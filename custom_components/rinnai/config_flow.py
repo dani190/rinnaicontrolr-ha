@@ -193,13 +193,28 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
 
         try:
             # Use Home Assistant's shared session for connection pooling
-            from homeassistant.helpers.aiohttp_client import async_get_clientsession
+            import aiohttp
+            LOGGER.error("DEBUG: Attempting login for %s with NEW session", self.username)
+            
+            async with aiohttp.ClientSession() as session:
+                temp_api = API(session=session)
+                await temp_api.async_login(self.username, self.password)
+                LOGGER.error("DEBUG: Login successful with NEW session")
+                
+                access_token = temp_api.access_token
+                refresh_token = temp_api.refresh_token
+                user_info = await temp_api.user.get_info()
 
-            session = async_get_clientsession(self.hass)
-            self.api = API(session=session)
-            LOGGER.error("DEBUG: Attempting login for %s", self.username)
-            await self.api.async_login(self.username, self.password)
-            LOGGER.error("DEBUG: Login successful for %s", self.username)
+            # For long term use, we'll create a new API instance with the HA session
+            # but we'll use the tokens we just got
+            from homeassistant.helpers.aiohttp_client import async_get_clientsession
+            ha_session = async_get_clientsession(self.hass)
+            self.api = API(session=ha_session)
+            
+            # We will use access_token and refresh_token directly in the 'data' dict below
+            title = user_info["email"]
+            
+            LOGGER.error("DEBUG: Successfully retrieved user info and tokens")
         except UserNotFound:
             LOGGER.error("User account not found for %s", self.username)
             errors["base"] = "invalid_auth"
@@ -259,8 +274,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
         data: dict[str, Any] = {
             CONF_CONNECTION_MODE: CONNECTION_MODE_CLOUD,
             CONF_EMAIL: self.username,
-            CONF_ACCESS_TOKEN: self.api.access_token,
-            CONF_REFRESH_TOKEN: self.api.refresh_token,
+            CONF_ACCESS_TOKEN: access_token,
+            CONF_REFRESH_TOKEN: refresh_token,
         }
         LOGGER.error("DEBUG: Prepared data dict")
 
@@ -485,13 +500,22 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
 
         try:
             # Use Home Assistant's shared session for connection pooling
-            from homeassistant.helpers.aiohttp_client import async_get_clientsession
+            import aiohttp
+            LOGGER.error("DEBUG: Reauth attempting login for %s with NEW session", self.username)
+            
+            async with aiohttp.ClientSession() as session:
+                temp_api = API(session=session)
+                await temp_api.async_login(self.username, self.password)
+                LOGGER.error("DEBUG: Reauth login successful with NEW session")
+                
+                access_token = temp_api.access_token
+                refresh_token = temp_api.refresh_token
 
-            session = async_get_clientsession(self.hass)
-            self.api = API(session=session)
-            LOGGER.error("DEBUG: Reauth attempting login for %s", self.username)
-            await self.api.async_login(self.username, self.password)
-            LOGGER.error("DEBUG: Reauth login successful")
+            # Re-initialize API with HA session for long-term use
+            from homeassistant.helpers.aiohttp_client import async_get_clientsession
+            ha_session = async_get_clientsession(self.hass)
+            self.api = API(session=ha_session)
+            
         except UserNotFound:
             LOGGER.error("Reauth: User account not found for %s", self.username)
             errors["base"] = "invalid_auth"
@@ -548,8 +572,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
             new_data = {
                 **entry.data,
                 CONF_EMAIL: self.username,
-                CONF_ACCESS_TOKEN: self.api.access_token,
-                CONF_REFRESH_TOKEN: self.api.refresh_token,
+                CONF_ACCESS_TOKEN: access_token,
+                CONF_REFRESH_TOKEN: refresh_token,
             }
 
             # Store or remove password based on user preference
@@ -679,13 +703,23 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
 
         try:
             # Use Home Assistant's shared session for connection pooling
-            from homeassistant.helpers.aiohttp_client import async_get_clientsession
+            import aiohttp
+            LOGGER.error("DEBUG: Reconfigure attempting login for %s with NEW session", self.username)
+            
+            async with aiohttp.ClientSession() as session:
+                temp_api = API(session=session)
+                await temp_api.async_login(self.username, self.password)
+                LOGGER.error("DEBUG: Reconfigure login successful with NEW session")
+                
+                access_token = temp_api.access_token
+                refresh_token = temp_api.refresh_token
 
-            session = async_get_clientsession(self.hass)
-            self.api = API(session=session)
-            await self.api.async_login(self.username, self.password)
+            # Re-initialize API with HA session for long-term use
+            from homeassistant.helpers.aiohttp_client import async_get_clientsession
+            ha_session = async_get_clientsession(self.hass)
+            self.api = API(session=ha_session)
+            
         except UserNotFound:
-            LOGGER.error("Reconfigure: User account not found for %s", self.username)
             errors["base"] = "invalid_auth"
             return self.async_show_form(
                 step_id="reconfigure_cloud",
@@ -724,8 +758,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
             **entry.data,
             CONF_CONNECTION_MODE: self.connection_mode,
             CONF_EMAIL: self.username,
-            CONF_ACCESS_TOKEN: self.api.access_token,
-            CONF_REFRESH_TOKEN: self.api.refresh_token,
+            CONF_ACCESS_TOKEN: access_token,
+            CONF_REFRESH_TOKEN: refresh_token,
         }
         if self.host:
             new_data[CONF_HOST] = self.host
