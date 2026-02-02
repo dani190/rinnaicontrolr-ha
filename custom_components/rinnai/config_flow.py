@@ -160,6 +160,37 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
         self.save_password = user_input.get(CONF_SAVE_PASSWORD, False)
         LOGGER.debug("Config flow: attempting cloud login for %s", self.username)
 
+        # Network Diagnostic Block
+        try:
+            import socket
+            import asyncio
+            LOGGER.error("DIAG: Starting Network Check")
+            
+            targets = [
+                ("google.com", 443),
+                ("cognito-idp.us-east-1.amazonaws.com", 443),
+                ("10.20.0.59", 80)
+            ]
+            
+            for host, port in targets:
+                try:
+                    LOGGER.error(f"DIAG: Resolving {host}...")
+                    addr_info = await asyncio.get_event_loop().run_in_executor(
+                        None, socket.gethostbyname, host
+                    )
+                    LOGGER.error(f"DIAG: Resolved {host} to {addr_info}")
+                    
+                    # Optional: Try TCP connect?
+                    # reader, writer = await asyncio.open_connection(host, port)
+                    # LOGGER.error(f"DIAG: Connected to {host}:{port}")
+                    # writer.close()
+                    # await writer.wait_closed()
+                except Exception as e:
+                    LOGGER.error(f"DIAG: Failed to check {host}: {e}")
+                    
+        except Exception as e:
+            LOGGER.error(f"DIAG: Diagnostic block failed: {e}")
+
         try:
             # Use Home Assistant's shared session for connection pooling
             from homeassistant.helpers.aiohttp_client import async_get_clientsession
