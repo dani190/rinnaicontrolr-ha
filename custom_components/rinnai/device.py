@@ -20,6 +20,7 @@ from .const import (
     CONF_MAINT_INTERVAL_ENABLED,
     CONF_MAINT_INTERVAL_MINUTES,
     CONF_REFRESH_TOKEN,
+    CONF_STORED_PASSWORD,
     CONNECTION_MODE_CLOUD,
     CONNECTION_MODE_HYBRID,
     CONNECTION_MODE_LOCAL,
@@ -190,7 +191,20 @@ class RinnaiDeviceDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._persist_tokens_if_changed()
 
         except Unauthenticated as err:
-            LOGGER.error("Refresh token expired or invalid: %s", err)
+            LOGGER.warning("Refresh token expired or invalid: %s", err)
+            
+            # Attempt automatic re-login if password is stored
+            stored_password = self._config_entry.data.get(CONF_STORED_PASSWORD)
+            if stored_password:
+                LOGGER.info("Attempting automatic re-login with stored password")
+                try:
+                    await self.api_client.async_login(email, stored_password)
+                    LOGGER.info("Automatic re-login successful")
+                    await self._persist_tokens_if_changed()
+                    return
+                except Exception as login_err:
+                    LOGGER.error("Automatic re-login failed: %s", login_err)
+            
             raise ConfigEntryAuthFailed(
                 "Authentication expired. Please re-authenticate."
             ) from err
