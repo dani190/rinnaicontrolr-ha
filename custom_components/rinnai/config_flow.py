@@ -166,8 +166,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
 
             session = async_get_clientsession(self.hass)
             self.api = API(session=session)
+            LOGGER.error("DEBUG: Attempting login for %s", self.username)
             await self.api.async_login(self.username, self.password)
-            LOGGER.debug("Config flow: cloud login successful")
+            LOGGER.error("DEBUG: Login successful for %s", self.username)
         except UserNotFound:
             LOGGER.error("User account not found for %s", self.username)
             errors["base"] = "invalid_auth"
@@ -200,14 +201,29 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
                 data_schema=_get_cloud_auth_schema(default_email=self.username),
                 errors=errors,
             )
+        except Exception as e:
+            LOGGER.error("DEBUG: Unexpected error during login: %s", e, exc_info=True)
+            errors["base"] = "unknown"
+            return self.async_show_form(
+                step_id="cloud",
+                data_schema=_get_cloud_auth_schema(default_email=self.username),
+                errors=errors,
+            )
 
+        LOGGER.error("DEBUG: Fetching user info")
         user_info = await self.api.user.get_info()
         title = user_info["email"]
-        LOGGER.debug("Config flow: retrieved user info for %s", title)
+        LOGGER.error("DEBUG: Retrieved user info for %s", title)
 
         # Set unique ID based on email to prevent duplicate entries
         await self.async_set_unique_id(self.username.lower())
-        self._abort_if_unique_id_configured()
+        LOGGER.error("DEBUG: Set unique ID to %s", self.username.lower())
+        
+        # Only abort if NOT reauthenticating (Hass handles reauth context automatically usually)
+        # But let's be safe
+        if self.context.get("source") != "reauth":
+             self._abort_if_unique_id_configured()
+             LOGGER.error("DEBUG: Abort check passed")
 
         data: dict[str, Any] = {
             CONF_CONNECTION_MODE: CONNECTION_MODE_CLOUD,
@@ -215,13 +231,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
             CONF_ACCESS_TOKEN: self.api.access_token,
             CONF_REFRESH_TOKEN: self.api.refresh_token,
         }
+        LOGGER.error("DEBUG: Prepared data dict")
 
         # Store password for automatic re-authentication if user opted in
         if self.save_password and self.password:
             data[CONF_STORED_PASSWORD] = self.password
-            LOGGER.debug("Config flow: password will be stored for auto re-auth")
+            LOGGER.error("DEBUG: Password added to data dict")
 
-        LOGGER.info("Config flow: creating cloud config entry for %s", title)
+        LOGGER.error("DEBUG: Creating entry")
         return self.async_create_entry(
             title=title,
             data=data,
@@ -441,7 +458,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
 
             session = async_get_clientsession(self.hass)
             self.api = API(session=session)
+            LOGGER.error("DEBUG: Reauth attempting login for %s", self.username)
             await self.api.async_login(self.username, self.password)
+            LOGGER.error("DEBUG: Reauth login successful")
         except UserNotFound:
             LOGGER.error("Reauth: User account not found for %s", self.username)
             errors["base"] = "invalid_auth"
@@ -476,15 +495,25 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
                 data_schema=_get_cloud_auth_schema(default_email=self.username),
                 errors=errors,
             )
+        except Exception as e:
+            LOGGER.error("DEBUG: Reauth unexpected error: %s", e, exc_info=True)
+            errors["base"] = "unknown"
+            return self.async_show_form(
+                step_id="reauth",
+                data_schema=_get_cloud_auth_schema(default_email=self.username),
+                errors=errors,
+            )
 
         # Safely get entry_id from context
         entry_id = self.context.get("entry_id")
+        LOGGER.error("DEBUG: Reauth entry_id: %s", entry_id)
         if not entry_id:
             LOGGER.error("Reauth: No entry_id in context; cannot update tokens.")
             return self.async_abort(reason="reauth_failed")
 
         entry = self.hass.config_entries.async_get_entry(entry_id)
         if entry:
+            LOGGER.error("DEBUG: Reauth updating entry")
             new_data = {
                 **entry.data,
                 CONF_EMAIL: self.username,
@@ -495,10 +524,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
             # Store or remove password based on user preference
             if self.save_password and self.password:
                 new_data[CONF_STORED_PASSWORD] = self.password
+                LOGGER.error("DEBUG: Reauth password saved")
             elif CONF_STORED_PASSWORD in new_data:
                 del new_data[CONF_STORED_PASSWORD]
+                LOGGER.error("DEBUG: Reauth password removed")
 
             self.hass.config_entries.async_update_entry(entry, data=new_data)
+            LOGGER.error("DEBUG: Reauth entry updated, reloading")
             self.hass.async_create_task(
                 self.hass.config_entries.async_reload(entry.entry_id)
             )
