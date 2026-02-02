@@ -71,12 +71,22 @@ def _get_connection_mode_selector() -> SelectSelector:
 
 def _get_cloud_auth_schema(
     default_email: str = "",
+    default_save_password: bool = DEFAULT_SAVE_PASSWORD,
 ) -> vol.Schema:
-    """Get the cloud authentication schema."""
+    """Get the cloud authentication schema.
+
+    Args:
+        default_email: Pre-filled email address.
+        default_save_password: Default value for save password checkbox.
+
+    Returns:
+        Schema for cloud authentication form.
+    """
     return vol.Schema(
         {
             vol.Required(CONF_EMAIL, default=default_email): str,
             vol.Required(CONF_PASSWORD): str,
+            vol.Optional(CONF_SAVE_PASSWORD, default=default_save_password): bool,
         }
     )
 
@@ -147,6 +157,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
 
         self.username = user_input[CONF_EMAIL]
         self.password = user_input[CONF_PASSWORD]
+        self.save_password = user_input.get(CONF_SAVE_PASSWORD, False)
         LOGGER.debug("Config flow: attempting cloud login for %s", self.username)
 
         try:
@@ -198,12 +209,17 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
         await self.async_set_unique_id(self.username.lower())
         self._abort_if_unique_id_configured()
 
-        data = {
+        data: dict[str, Any] = {
             CONF_CONNECTION_MODE: CONNECTION_MODE_CLOUD,
             CONF_EMAIL: self.username,
             CONF_ACCESS_TOKEN: self.api.access_token,
             CONF_REFRESH_TOKEN: self.api.refresh_token,
         }
+
+        # Store password for automatic re-authentication if user opted in
+        if self.save_password and self.password:
+            data[CONF_STORED_PASSWORD] = self.password
+            LOGGER.debug("Config flow: password will be stored for auto re-auth")
 
         LOGGER.info("Config flow: creating cloud config entry for %s", title)
         return self.async_create_entry(
@@ -287,6 +303,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
 
         self.username = user_input[CONF_EMAIL]
         self.password = user_input[CONF_PASSWORD]
+        self.save_password = user_input.get(CONF_SAVE_PASSWORD, False)
 
         try:
             # Use Home Assistant's shared session for connection pooling
@@ -379,13 +396,18 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
         await self.async_set_unique_id(self.username.lower())
         self._abort_if_unique_id_configured()
 
-        data = {
+        data: dict[str, Any] = {
             CONF_CONNECTION_MODE: CONNECTION_MODE_HYBRID,
             CONF_EMAIL: self.username,
             CONF_ACCESS_TOKEN: self.api.access_token,
             CONF_REFRESH_TOKEN: self.api.refresh_token,
             CONF_HOST: self.host,
         }
+
+        # Store password for automatic re-authentication if user opted in
+        if self.save_password and self.password:
+            data[CONF_STORED_PASSWORD] = self.password
+            LOGGER.debug("Config flow: password will be stored for auto re-auth")
 
         return self.async_create_entry(
             title=title,
@@ -411,6 +433,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
 
         self.username = user_input[CONF_EMAIL]
         self.password = user_input[CONF_PASSWORD]
+        self.save_password = user_input.get(CONF_SAVE_PASSWORD, False)
 
         try:
             # Use Home Assistant's shared session for connection pooling
@@ -462,15 +485,20 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
 
         entry = self.hass.config_entries.async_get_entry(entry_id)
         if entry:
-            self.hass.config_entries.async_update_entry(
-                entry,
-                data={
-                    **entry.data,
-                    CONF_EMAIL: self.username,
-                    CONF_ACCESS_TOKEN: self.api.access_token,
-                    CONF_REFRESH_TOKEN: self.api.refresh_token,
-                },
-            )
+            new_data = {
+                **entry.data,
+                CONF_EMAIL: self.username,
+                CONF_ACCESS_TOKEN: self.api.access_token,
+                CONF_REFRESH_TOKEN: self.api.refresh_token,
+            }
+
+            # Store or remove password based on user preference
+            if self.save_password and self.password:
+                new_data[CONF_STORED_PASSWORD] = self.password
+            elif CONF_STORED_PASSWORD in new_data:
+                del new_data[CONF_STORED_PASSWORD]
+
+            self.hass.config_entries.async_update_entry(entry, data=new_data)
             self.hass.async_create_task(
                 self.hass.config_entries.async_reload(entry.entry_id)
             )
@@ -584,6 +612,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
 
         self.username = user_input[CONF_EMAIL]
         self.password = user_input[CONF_PASSWORD]
+        self.save_password = user_input.get(CONF_SAVE_PASSWORD, False)
 
         try:
             # Use Home Assistant's shared session for connection pooling
@@ -628,7 +657,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
             )
 
         # Build new data with cloud credentials
-        new_data = {
+        new_data: dict[str, Any] = {
             **entry.data,
             CONF_CONNECTION_MODE: self.connection_mode,
             CONF_EMAIL: self.username,
@@ -637,6 +666,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
         }
         if self.host:
             new_data[CONF_HOST] = self.host
+
+        # Store or remove password based on user preference
+        if self.save_password and self.password:
+            new_data[CONF_STORED_PASSWORD] = self.password
+        elif CONF_STORED_PASSWORD in new_data:
+            del new_data[CONF_STORED_PASSWORD]
 
         self.hass.config_entries.async_update_entry(entry, data=new_data)
         await self.hass.config_entries.async_reload(entry.entry_id)
